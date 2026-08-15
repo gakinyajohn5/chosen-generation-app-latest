@@ -6,7 +6,7 @@
    involve payments, live data, and admin actions.
 ════════════════════════════════════════════════════════ */
 
-const CACHE_NAME = 'chosen-gen-hub-v1';
+const CACHE_NAME = 'chosen-gen-hub-v2';
 
 const APP_SHELL = [
   '/',
