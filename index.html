@@ -29,6 +29,7 @@
     </div>
     <h1 id="header-title" title="Tap for admin access">Chosen Gen Hub</h1>
     <div class="header-right">
+      <button id="help-btn" class="icon-btn" title="Help &amp; Install Guide" aria-label="Help and install guide">❓</button>
       <span id="admin-badge" class="admin-badge hidden">ADMIN</span>
     </div>
   </header>
@@ -46,6 +47,63 @@
       <div class="modal-actions">
         <button class="btn-secondary" id="admin-cancel-btn">Cancel</button>
         <button class="btn-primary" id="admin-confirm-btn">Unlock</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       HELP & INSTALL MODAL
+  ═══════════════════════════════════════════ -->
+  <div id="help-modal" class="modal-overlay hidden">
+    <div class="modal-box help-modal-box">
+      <button id="help-close-btn" class="help-close-btn" aria-label="Close">✕</button>
+      <div class="modal-icon">✝</div>
+      <h2>Welcome to Chosen Gen Hub</h2>
+      <p>A quick guide to installing the app and using its features</p>
+
+      <div class="help-tabs">
+        <button class="help-tab-btn active" data-help-tab="install">📲 Install on Phone</button>
+        <button class="help-tab-btn" data-help-tab="usage">📖 How to Use</button>
+      </div>
+
+      <!-- INSTALL TAB -->
+      <div id="help-panel-install" class="help-panel active">
+        <div class="help-platform-tabs">
+          <button class="help-platform-btn active" data-platform="android">Android</button>
+          <button class="help-platform-btn" data-platform="ios">iPhone</button>
+        </div>
+
+        <ol class="help-steps" id="help-steps-android">
+          <li>Open this site in <strong>Chrome</strong>.</li>
+          <li>Tap the <strong>⋮</strong> menu in the top-right corner.</li>
+          <li>Tap <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.</li>
+          <li>Tap <strong>Install</strong> to confirm.</li>
+          <li>Find the <strong>Chosen Gen Hub</strong> icon on your home screen — open it any time like a normal app.</li>
+        </ol>
+
+        <ol class="help-steps hidden" id="help-steps-ios">
+          <li>Open this site in <strong>Safari</strong> (not Chrome — Add to Home Screen only works from Safari on iPhone).</li>
+          <li>Tap the <strong>Share</strong> icon (square with an arrow pointing up) at the bottom of the screen.</li>
+          <li>Scroll down and tap <strong>"Add to Home Screen"</strong>.</li>
+          <li>Tap <strong>Add</strong> in the top-right corner.</li>
+          <li>Find the <strong>Chosen Gen Hub</strong> icon on your home screen — open it any time like a normal app.</li>
+        </ol>
+
+        <p class="help-note">Once installed, the app opens full-screen with no browser bar, and works even with a weak connection for pages you've already visited.</p>
+      </div>
+
+      <!-- USAGE TAB -->
+      <div id="help-panel-usage" class="help-panel">
+        <ul class="help-feature-list">
+          <li><span class="help-feature-icon">🏠</span><div><strong>Home</strong><span>Daily scripture, church announcements, and updates.</span></div></li>
+          <li><span class="help-feature-icon">🎙</span><div><strong>Meeting</strong><span>Join live fellowship meetings — enter a room name and your name, then tap Join Meeting.</span></div></li>
+          <li><span class="help-feature-icon">📚</span><div><strong>Resources</strong><span>Read the Bible (English or Swahili), search worship songs/sermons, and download videos.</span></div></li>
+          <li><span class="help-feature-icon">🙏</span><div><strong>Prayer</strong><span>Share prayer requests with the community.</span></div></li>
+          <li><span class="help-feature-icon">📅</span><div><strong>Calendar</strong><span>See upcoming church events and their dates.</span></div></li>
+          <li><span class="help-feature-icon">✨</span><div><strong>AI Help</strong><span>Ask questions and get AI-powered spiritual guidance and answers.</span></div></li>
+          <li><span class="help-feature-icon">📝</span><div><strong>Join</strong><span>Register as a member of the church community.</span></div></li>
+        </ul>
+        <p class="help-note">Tap this ❓ icon anytime you need this guide again.</p>
       </div>
     </div>
   </div>
@@ -619,6 +677,57 @@
   </nav>
 
   <div id="toast" class="toast hidden"></div>
+  <script>
+    // ── Help & Install modal (self-contained, doesn't touch app.js) ──
+    document.addEventListener('DOMContentLoaded', () => {
+      const helpBtn      = document.getElementById('help-btn');
+      const helpModal     = document.getElementById('help-modal');
+      const helpCloseBtn  = document.getElementById('help-close-btn');
+
+      if (helpBtn && helpModal) {
+        helpBtn.addEventListener('click', () => helpModal.classList.remove('hidden'));
+        helpCloseBtn.addEventListener('click', () => helpModal.classList.add('hidden'));
+        helpModal.addEventListener('click', (e) => {
+          if (e.target === helpModal) helpModal.classList.add('hidden');
+        });
+
+        // Top-level tabs: Install vs How to Use
+        document.querySelectorAll('.help-tab-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            document.querySelectorAll('.help-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.help-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('help-panel-' + btn.dataset.helpTab).classList.add('active');
+          });
+        });
+
+        // Install sub-tabs: Android vs iPhone
+        document.querySelectorAll('.help-platform-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            document.querySelectorAll('.help-platform-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('help-steps-android').classList.toggle('hidden', btn.dataset.platform !== 'android');
+            document.getElementById('help-steps-ios').classList.toggle('hidden', btn.dataset.platform !== 'ios');
+          });
+        });
+
+        // Auto-detect platform and pre-select the right tab
+        const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        if (isIOS) {
+          document.querySelector('.help-platform-btn[data-platform="ios"]').click();
+        }
+
+        // Show the guide automatically on someone's very first visit
+        try {
+          if (!localStorage.getItem('cgh_help_seen')) {
+            helpModal.classList.remove('hidden');
+            localStorage.setItem('cgh_help_seen', '1');
+          }
+        } catch (e) { /* localStorage unavailable — skip auto-show, button still works */ }
+      }
+    });
+  </script>
+
   <script src="app.js"></script>
 </body>
 </html>
