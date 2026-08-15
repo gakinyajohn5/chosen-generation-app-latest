@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+downloads/*
+!downloads/.gitkeep
+members/_members.json
+.DS_Store
+*.log
