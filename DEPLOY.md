@@ -54,9 +54,39 @@ Render builds the Docker image and starts the service. First build takes
 a few minutes (installing yt-dlp/ffmpeg). Your app will be live at
 `https://YOUR-APP.onrender.com`.
 
-## Notes
+## Fixing "Sign in to confirm you're not a bot" (video downloader)
 
-- **Ephemeral disk:** Render's filesystem resets on every redeploy/restart.
+YouTube blocks download requests coming from cloud servers like Render more
+aggressively than requests from home internet connections. The fix is to
+give yt-dlp cookies from a real, logged-in YouTube session so it looks like
+a normal signed-in visitor instead of an anonymous bot.
+
+**Use a throwaway/secondary Google account for this, not your main one** —
+these cookies let the server act as that account.
+
+1. In Chrome, install the free extension **"Get cookies.txt LOCALLY"** from
+   the Chrome Web Store.
+2. Go to youtube.com and make sure you're logged in.
+3. Click the extension icon → **Export** → this downloads a file called
+   `cookies.txt`.
+4. On your Render dashboard, open your service → **Environment** tab →
+   scroll to **Secret Files** → **Add Secret File**.
+   - Filename: `/etc/secrets/cookies.txt`
+   - Contents: paste the entire contents of the `cookies.txt` file you downloaded.
+5. Save. Render redeploys automatically.
+6. Check the **Logs** tab after it restarts — you should now see:
+   `Cookies → found at /etc/secrets/cookies.txt ✅`
+
+Cookies expire periodically (YouTube sessions time out) — if downloads
+start failing again after a while, just repeat these steps to re-export
+fresh cookies.
+
+**Never commit `cookies.txt` to GitHub** — it's already excluded, but don't
+paste it anywhere except Render's Secret Files box, since anyone with it
+could access that YouTube account.
+
+## Ephemeral disk (recap)
+- Render's filesystem resets on every redeploy/restart.
   `downloads/` and `members/_members.json` won't persist between deploys.
   If you need persistent storage, add a Render Disk (paid) or move that
   data to an external store (S3, a database).
