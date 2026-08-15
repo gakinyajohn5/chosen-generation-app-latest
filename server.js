@@ -248,9 +248,16 @@ app.post('/api/chat', async (req, res) => {
 /* ────────────────────────────────────────────────────────
    yt-dlp helpers (from GrabSave)
 ──────────────────────────────────────────────────────── */
+// Optional YouTube cookies file — if present, yt-dlp uses it to look like a
+// real signed-in browser instead of an anonymous cloud server, which avoids
+// YouTube's "Sign in to confirm you're not a bot" block. See DEPLOY.md.
+const COOKIES_PATH = process.env.COOKIES_FILE || '/etc/secrets/cookies.txt';
+const hasCookies   = () => fs.existsSync(COOKIES_PATH);
+const cookiesFlag  = () => hasCookies() ? `--cookies "${COOKIES_PATH}"` : '';
+
 function ytdlp(args) {
   return new Promise((resolve, reject) => {
-    exec(`yt-dlp ${args}`, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    exec(`yt-dlp ${cookiesFlag()} ${args}`, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(stderr || err.message);
       resolve(stdout.trim());
     });
@@ -405,6 +412,7 @@ app.post('/api/download/stream', async (req, res) => {
     '-o', outPath,
     url
   ];
+  if (hasCookies()) args.unshift('--cookies', COOKIES_PATH);
 
   console.log(`[DL] Starting: ${filename} fmt=${fmtArg}`);
 
@@ -782,6 +790,9 @@ app.listen(PORT, () => {
   console.log(`   http://localhost:${PORT}`);
   console.log(`   AI  → gemini-2.5-flash  ✅`);
   console.log(`   SDK → @google/genai\n`);
+  console.log(hasCookies()
+    ? `   Cookies → found at ${COOKIES_PATH}  ✅ (YouTube downloads authenticated)`
+    : `   Cookies → none found  ⚠️  (YouTube may block downloads as "not a bot" — see DEPLOY.md)`);
 
   // Check yt-dlp on startup
   exec('yt-dlp --version', (err, stdout) => {
