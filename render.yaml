@@ -2,7 +2,7 @@ services:
   - type: web
     name: chosen-generation-app
     env: docker
-    plan: starter
+    plan: free
     dockerfilePath: ./Dockerfile
     envVars:
       - key: GEMINI_API_KEY
