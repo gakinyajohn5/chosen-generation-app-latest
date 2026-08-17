@@ -32,6 +32,8 @@ const path           = require('path');
 const fs             = require('fs');
 const { exec, spawn } = require('child_process');
 const { GoogleGenAI } = require('@google/genai');
+const pool           = require('./db/pool');
+const communityRoutes = require('./db/routes');
 
 const app           = express();
 const PORT          = process.env.PORT || 3000;
@@ -181,6 +183,10 @@ if (!fs.existsSync(DOWNLOADS_DIR)) fs.mkdirSync(DOWNLOADS_DIR, { recursive: true
 app.use(require('compression')());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '.')));
+
+// Announcements, events, prayers, contributions, RSVPs, amens, activity log —
+// all backed by Postgres now, see db/routes.js
+app.use('/api', communityRoutes);
 
 /* ────────────────────────────────────────────────────────
    SYSTEM PROMPT
@@ -539,84 +545,135 @@ app.post('/api/docs/delete', (req, res) => {
    MEMBER REGISTRY ROUTES
    Stores member data in members/_members.json
 ──────────────────────────────────────────────────────── */
-const MEMBERS_DIR  = path.join(__dirname, 'members');
-const MEMBERS_FILE = path.join(MEMBERS_DIR, '_members.json');
+// Members now live in Postgres (Supabase) instead of members/_members.json,
+// so data survives Render redeploys/restarts and is shared across devices.
 
-if (!fs.existsSync(MEMBERS_DIR)) fs.mkdirSync(MEMBERS_DIR, { recursive: true });
-
-function loadMembers() {
-  try { return JSON.parse(fs.readFileSync(MEMBERS_FILE, 'utf8')); }
-  catch { return []; }
+function rowToMember(r) {
+  return {
+    id: r.id,
+    fullName: r.full_name,
+    phone: r.phone,
+    email: r.email,
+    dob: r.dob,
+    gender: r.gender,
+    address: r.address,
+    emergencyContact: r.emergency_contact,
+    notes: r.notes,
+    status: r.status,
+    role: r.role,
+    mpesaReceipt: r.mpesa_receipt || undefined,
+    amountPaid: r.amount_paid || undefined,
+    registeredAt: r.registered_at,
+    updatedAt: r.updated_at || undefined
+  };
 }
-function saveMembers(members) {
-  fs.writeFileSync(MEMBERS_FILE, JSON.stringify(members, null, 2));
+
+async function loadMembers() {
+  const { rows } = await pool.query('SELECT * FROM members ORDER BY registered_at DESC');
+  return rows.map(rowToMember);
+}
+
+async function findMemberByPhone(phone) {
+  const { rows } = await pool.query('SELECT * FROM members WHERE phone = $1', [phone]);
+  return rows[0] ? rowToMember(rows[0]) : null;
+}
+
+async function insertMember(member) {
+  await pool.query(
+    `INSERT INTO members
+      (id, full_name, phone, email, dob, gender, address, emergency_contact, notes, status, role, mpesa_receipt, amount_paid, registered_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+    [
+      member.id, member.fullName, member.phone, member.email, member.dob, member.gender,
+      member.address, member.emergencyContact, member.notes, member.status, member.role,
+      member.mpesaReceipt || null, member.amountPaid || null, member.registeredAt
+    ]
+  );
 }
 
 // POST /api/members/register  — public, no auth needed
-app.post('/api/members/register', (req, res) => {
-  const { fullName, phone, email, dob, gender, address, emergencyContact, notes } = req.body;
-  if (!fullName || !fullName.trim())
-    return res.status(400).json({ error: 'Full name is required.' });
-  if (!phone || !phone.trim())
-    return res.status(400).json({ error: 'Phone number is required.' });
+app.post('/api/members/register', async (req, res) => {
+  try {
+    const { fullName, phone, email, dob, gender, address, emergencyContact, notes } = req.body;
+    if (!fullName || !fullName.trim())
+      return res.status(400).json({ error: 'Full name is required.' });
+    if (!phone || !phone.trim())
+      return res.status(400).json({ error: 'Phone number is required.' });
 
-  const members = loadMembers();
+    // Prevent duplicate phone registrations
+    if (await findMemberByPhone(phone.trim()))
+      return res.status(409).json({ error: 'A member with this phone number is already registered.' });
 
-  // Prevent duplicate phone registrations
-  if (members.find(m => m.phone === phone.trim()))
-    return res.status(409).json({ error: 'A member with this phone number is already registered.' });
+    const member = {
+      id:               'mbr_' + Date.now(),
+      fullName:         fullName.trim().slice(0, 100),
+      phone:            phone.trim().slice(0, 20),
+      email:            (email || '').trim().slice(0, 100),
+      dob:              (dob   || '').trim(),
+      gender:           (gender || '').trim(),
+      address:          (address || '').trim().slice(0, 200),
+      emergencyContact: (emergencyContact || '').trim().slice(0, 100),
+      notes:            (notes || '').trim().slice(0, 300),
+      status:           'pending',   // pending | active | inactive
+      role:             'member',    // member | secretary | treasurer
+      registeredAt:     new Date().toISOString()
+    };
 
-  const member = {
-    id:               'mbr_' + Date.now(),
-    fullName:         fullName.trim().slice(0, 100),
-    phone:            phone.trim().slice(0, 20),
-    email:            (email || '').trim().slice(0, 100),
-    dob:              (dob   || '').trim(),
-    gender:           (gender || '').trim(),
-    address:          (address || '').trim().slice(0, 200),
-    emergencyContact: (emergencyContact || '').trim().slice(0, 100),
-    notes:            (notes || '').trim().slice(0, 300),
-    status:           'pending',   // pending | active | inactive
-    role:             'member',    // member | secretary | treasurer
-    registeredAt:     new Date().toISOString()
-  };
-
-  members.push(member);
-  saveMembers(members);
-  console.log(`[MEMBERS] New registration: ${member.fullName}`);
-  res.json({ ok: true, id: member.id, message: 'Registration successful! The secretary will confirm your membership shortly.' });
+    await insertMember(member);
+    console.log(`[MEMBERS] New registration: ${member.fullName}`);
+    res.json({ ok: true, id: member.id, message: 'Registration successful! The secretary will confirm your membership shortly.' });
+  } catch (err) {
+    console.error('[MEMBERS] register error:', err.message);
+    res.status(500).json({ error: 'Could not save registration. Please try again.' });
+  }
 });
 
 // GET /api/members/list  — returns all members (secretary/treasurer use)
-app.get('/api/members/list', (req, res) => {
-  res.json({ members: loadMembers() });
+app.get('/api/members/list', async (req, res) => {
+  try {
+    res.json({ members: await loadMembers() });
+  } catch (err) {
+    console.error('[MEMBERS] list error:', err.message);
+    res.status(500).json({ error: 'Could not load members.' });
+  }
 });
 
 // POST /api/members/update  — update status or role
-app.post('/api/members/update', (req, res) => {
-  const { id, status, role, notes } = req.body;
-  if (!id) return res.status(400).json({ error: 'Member ID required.' });
+app.post('/api/members/update', async (req, res) => {
+  try {
+    const { id, status, role, notes } = req.body;
+    if (!id) return res.status(400).json({ error: 'Member ID required.' });
 
-  const members = loadMembers();
-  const idx = members.findIndex(m => m.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Member not found.' });
+    const { rows } = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Member not found.' });
 
-  if (status) members[idx].status = status;
-  if (role)   members[idx].role   = role;
-  if (notes !== undefined) members[idx].notes = notes.slice(0, 300);
-  members[idx].updatedAt = new Date().toISOString();
-
-  saveMembers(members);
-  res.json({ ok: true });
+    await pool.query(
+      `UPDATE members SET
+         status = COALESCE($2, status),
+         role = COALESCE($3, role),
+         notes = COALESCE($4, notes),
+         updated_at = now()
+       WHERE id = $1`,
+      [id, status || null, role || null, notes !== undefined ? notes.slice(0, 300) : null]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[MEMBERS] update error:', err.message);
+    res.status(500).json({ error: 'Could not update member.' });
+  }
 });
 
 // POST /api/members/delete
-app.post('/api/members/delete', (req, res) => {
-  const { id } = req.body;
-  if (!id) return res.status(400).json({ error: 'Member ID required.' });
-  const members = loadMembers().filter(m => m.id !== id);
-  saveMembers(members);
-  res.json({ ok: true });
+app.post('/api/members/delete', async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'Member ID required.' });
+    await pool.query('DELETE FROM members WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[MEMBERS] delete error:', err.message);
+    res.status(500).json({ error: 'Could not delete member.' });
+  }
 });
 
 /* ────────────────────────────────────────────────────────
@@ -635,8 +692,7 @@ app.post('/api/mpesa/stkpush', async (req, res) => {
     return res.status(400).json({ error: 'Phone number is required.' });
 
   // Check for duplicate before charging
-  const members = loadMembers();
-  if (members.find(m => m.phone === phone.trim()))
+  if (await findMemberByPhone(phone.trim()))
     return res.status(409).json({ error: 'A member with this phone number is already registered.' });
 
   let mpesaPhone;
@@ -698,7 +754,7 @@ app.post('/api/mpesa/stkpush', async (req, res) => {
 });
 
 // POST /api/mpesa/callback  — Safaricom calls this after payment attempt
-app.post('/api/mpesa/callback', (req, res) => {
+app.post('/api/mpesa/callback', async (req, res) => {
   try {
     const body   = req.body?.Body?.stkCallback;
     if (!body)   return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
@@ -723,9 +779,8 @@ app.post('/api/mpesa/callback', (req, res) => {
       const receipt   = items.find(i => i.Name === 'MpesaReceiptNumber')?.Value || '';
       const amountPaid= items.find(i => i.Name === 'Amount')?.Value || MPESA.AMOUNT;
 
-      const members = loadMembers();
       // Double-check for duplicate (race condition guard)
-      if (!members.find(m => m.phone === memberData.phone.trim())) {
+      if (!(await findMemberByPhone(memberData.phone.trim()))) {
         const member = {
           id:               'mbr_' + Date.now(),
           fullName:         memberData.fullName.slice(0, 100),
@@ -742,8 +797,7 @@ app.post('/api/mpesa/callback', (req, res) => {
           amountPaid:       amountPaid,
           registeredAt:     new Date().toISOString()
         };
-        members.push(member);
-        saveMembers(members);
+        await insertMember(member);
         console.log(`[MPESA] ✅ Member saved: ${member.fullName} | Receipt: ${receipt}`);
       }
 
