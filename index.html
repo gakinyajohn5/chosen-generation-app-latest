@@ -27,7 +27,10 @@
     <div class="header-left">
       <div class="header-cross">✝</div>
     </div>
-    <h1 id="header-title" title="Tap for admin access">Chosen Gen Hub</h1>
+    <div class="header-titles">
+      <h1 id="header-title" title="Tap for admin access">Chosen Gen Hub</h1>
+      <p id="user-greeting" class="user-greeting hidden"></p>
+    </div>
     <div class="header-right">
       <button id="help-btn" class="icon-btn" title="Help &amp; Install Guide" aria-label="Help and install guide">❓</button>
       <span id="admin-badge" class="admin-badge hidden">ADMIN</span>
@@ -560,7 +563,14 @@
         <div class="reg-success-icon">✝</div>
         <h3>Welcome to the Family!</h3>
         <p>Your registration has been submitted. The secretary will confirm your membership shortly. God bless you!</p>
-        <button class="btn-primary" id="reg-another-btn" style="margin-top:14px">Register Another Person</button>
+      </div>
+
+      <!-- Shown instead of the form once this device has already registered -->
+      <div id="reg-already-card" class="reg-success-card hidden">
+        <div class="reg-success-icon">✝</div>
+        <h3>Welcome back, <span id="reg-already-name"></span>!</h3>
+        <p>You're already registered with us on this device. Great to see you again.</p>
+        <button class="btn-ghost" id="reg-not-you-btn" style="margin-top:14px">Not you? Register a different person</button>
       </div>
 
       <div id="reg-form-wrap">
@@ -601,26 +611,12 @@
 
         <div id="reg-status" class="reg-status hidden"></div>
 
-        <!-- STK Push waiting screen (hidden until push sent) -->
-        <div id="reg-stk-waiting" class="reg-stk-waiting hidden">
-          <div class="stk-spinner-wrap">
-            <div class="stk-spinner"></div>
-          </div>
-          <h3>Check Your Phone 📱</h3>
-          <p id="reg-stk-msg">A payment prompt has been sent. Enter your M-Pesa PIN to complete registration.</p>
-          <div class="stk-receipt hidden" id="stk-receipt-box">
-            <span class="stk-receipt-icon">✅</span>
-            <span id="stk-receipt-text"></span>
-          </div>
-          <button class="btn-ghost" id="reg-stk-cancel-btn" style="margin-top:12px">✕ Cancel / Try Again</button>
-        </div>
-
         <button class="btn-primary btn-large" id="reg-submit-btn">
-          <span>📱 Pay KES 20 &amp; Register</span>
+          <span>✅ Complete Registration</span>
         </button>
         <div class="reg-pay-note">
           <span>🔒</span>
-          <span>A KES 20 M-Pesa prompt will be sent to your phone. This covers app maintenance for the fellowship.</span>
+          <span>Your details are kept private and only visible to fellowship leadership.</span>
         </div>
       </div>
     </section>
