@@ -216,7 +216,7 @@ function getClient() {
    ① POST /api/chat
 ──────────────────────────────────────────────────────── */
 app.post('/api/chat', async (req, res) => {
-  const { message, history } = req.body;
+  const { message, history, userName } = req.body;
   if (!message || typeof message !== 'string' || !message.trim())
     return res.status(400).json({ error: 'Missing or empty message.' });
 
@@ -230,11 +230,19 @@ app.post('/api/chat', async (req, res) => {
   }
   contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
+  // Personalise the system prompt with the member's name, if known.
+  const cleanName = (typeof userName === 'string' ? userName.trim().slice(0, 100) : '');
+  const personalisedInstruction = cleanName
+    ? `${SYSTEM_INSTRUCTION}\n\nThe person you are speaking with is named "${cleanName}". ` +
+      `Address them by their first name naturally where it fits (for example in greetings or ` +
+      `encouragement), without overusing it in every single sentence.`
+    : SYSTEM_INSTRUCTION;
+
   try {
     const result = await getClient().models.generateContent({
       model: 'gemini-2.5-flash',
       contents,
-      config: { systemInstruction: SYSTEM_INSTRUCTION, maxOutputTokens: 800, temperature: 0.75, topP: 0.9 }
+      config: { systemInstruction: personalisedInstruction, maxOutputTokens: 800, temperature: 0.75, topP: 0.9 }
     });
     const text = result.text;
     if (!text) return res.status(500).json({ error: 'Empty response. Try again.' });
