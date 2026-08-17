@@ -264,35 +264,31 @@ const STATE = {
   isAdmin: false,
   activeTab: 'home',
   activeSubTab: 'bible',
-  announcements: JSON.parse(localStorage.getItem('cga_announcements') || '[]'),
-  events: JSON.parse(localStorage.getItem('cga_events') || '[]'),
-  prayers: JSON.parse(localStorage.getItem('cga_prayers') || '[]'),
-  activityLog: JSON.parse(localStorage.getItem('cga_log') || '[]'),
-  rsvps: JSON.parse(localStorage.getItem('cga_rsvps') || '{}'),
-  amens: JSON.parse(localStorage.getItem('cga_amens') || '{}'),
+  // announcements, events, prayers, and the activity log now live in
+  // Postgres (via /api/*) instead of localStorage, so every visitor sees
+  // the same data and it survives redeploys. These arrays are just an
+  // in-memory cache of the last fetch, populated by loadAnnouncements(),
+  // loadEvents(), loadPrayers(), and loadActivityLog() below.
+  announcements: [],
+  events: [],
+  prayers: [],
+  activityLog: [],
   savedDocs: JSON.parse(localStorage.getItem('cga_saved_docs') || '[]'),
   currentPrayerType: 'prayer'
 };
 
-// Seed default events if empty
-if (STATE.events.length === 0) {
-  STATE.events = [
-    { id: 'ev1', title: 'Sunday Worship Service', date: nextDate(0), time: '09:00 AM', desc: 'Weekly Sunday service. All members welcome. Bring your Bibles.', rsvpCount: 12 },
-    { id: 'ev2', title: 'Midweek Bible Study', date: nextDate(3), time: '06:00 PM', desc: 'In-depth Bible study. This week: Ephesians 6 — The Armour of God.', rsvpCount: 8 },
-    { id: 'ev3', title: 'Prayer Night', date: nextDate(5), time: '07:30 PM', desc: 'Corporate prayer and intercession. Come as you are.', rsvpCount: 15 },
-    { id: 'ev4', title: 'Leadership Meeting', date: nextDate(8), time: '05:00 PM', desc: 'Monthly leadership planning and review session.', rsvpCount: 6 }
-  ];
-  saveState();
+// A random per-device ID (NOT a login) so the server can tell "this browser
+// already RSVP'd / said Amen" apart from a login system. Safe to keep in
+// localStorage since it carries no personal data.
+function getDeviceId() {
+  let id = localStorage.getItem('cga_device_id');
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('cga_device_id', id);
+  }
+  return id;
 }
-
-// Seed default announcements if empty
-if (STATE.announcements.length === 0) {
-  STATE.announcements = [
-    { id: 'ann1', title: 'Welcome to Chosen Gen Hub! 🎉', body: 'This is your dedicated community app. Use it to connect, pray, and grow together in faith. Karibu sana!', date: new Date().toISOString() },
-    { id: 'ann2', title: 'Sunday Service – New Time', body: 'Starting this Sunday, our service begins at 9:00 AM sharp. Please arrive 10 minutes early for worship.', date: new Date().toISOString() }
-  ];
-  saveState();
-}
+const DEVICE_ID = getDeviceId();
 
 function nextDate(daysAhead) {
   const d = new Date();
@@ -301,13 +297,56 @@ function nextDate(daysAhead) {
 }
 
 function saveState() {
-  localStorage.setItem('cga_announcements', JSON.stringify(STATE.announcements));
-  localStorage.setItem('cga_events', JSON.stringify(STATE.events));
-  localStorage.setItem('cga_prayers', JSON.stringify(STATE.prayers));
-  localStorage.setItem('cga_log', JSON.stringify(STATE.activityLog));
-  localStorage.setItem('cga_rsvps', JSON.stringify(STATE.rsvps));
-  localStorage.setItem('cga_amens', JSON.stringify(STATE.amens));
+  // Only savedDocs remains a purely local, per-device preference.
   localStorage.setItem('cga_saved_docs', JSON.stringify(STATE.savedDocs));
+}
+
+/* ── Server-backed loaders ───────────────────────────────
+   Replace the old localStorage reads. Call these on init and
+   after any create/delete so the UI reflects the shared data. */
+
+async function loadAnnouncements() {
+  try {
+    const r = await fetch('/api/announcements');
+    const data = await r.json();
+    STATE.announcements = data.announcements || [];
+  } catch (err) {
+    console.error('Failed to load announcements:', err);
+  }
+  renderAnnouncements();
+}
+
+async function loadEvents() {
+  try {
+    const r = await fetch(`/api/events?deviceId=${encodeURIComponent(DEVICE_ID)}`);
+    const data = await r.json();
+    STATE.events = data.events || [];
+  } catch (err) {
+    console.error('Failed to load events:', err);
+  }
+  renderEvents();
+}
+
+async function loadPrayers() {
+  try {
+    const r = await fetch(`/api/prayers?deviceId=${encodeURIComponent(DEVICE_ID)}`);
+    const data = await r.json();
+    STATE.prayers = data.prayers || [];
+  } catch (err) {
+    console.error('Failed to load prayer wall:', err);
+  }
+  renderPrayers();
+}
+
+async function loadActivityLog() {
+  try {
+    const r = await fetch('/api/activity-log');
+    const data = await r.json();
+    STATE.activityLog = data.log || [];
+  } catch (err) {
+    console.error('Failed to load activity log:', err);
+  }
+  renderActivityLog();
 }
 
 /* ────────────────────────────────────────────────────────
@@ -347,12 +386,21 @@ function sanitize(str) {
   return d.innerHTML;
 }
 
-function logActivity(msg) {
+async function logActivity(msg) {
+  // Optimistically show it right away, then persist to the server.
   const entry = { msg, time: new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }) };
   STATE.activityLog.unshift(entry);
   if (STATE.activityLog.length > 50) STATE.activityLog.pop();
-  saveState();
   renderActivityLog();
+  try {
+    await fetch('/api/activity-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ msg })
+    });
+  } catch (err) {
+    console.error('Failed to save activity log entry:', err);
+  }
 }
 
 function extractVideoId(input) {
@@ -430,48 +478,62 @@ function initAdmin() {
   input.addEventListener('keydown', e => { if (e.key === 'Enter') attemptAdminLogin(); });
 
   // Post announcement
-  $('post-announce-btn').addEventListener('click', () => {
+  $('post-announce-btn').addEventListener('click', async () => {
     const title = $('announce-title').value.trim();
     const body = $('announce-body').value.trim();
     if (!title || !body) { showToast('⚠️ Please fill in both fields.'); return; }
-    const ann = { id: 'ann' + Date.now(), title, body, date: new Date().toISOString() };
-    STATE.announcements.unshift(ann);
-    saveState();
-    renderAnnouncements();
-    logActivity(`📣 Announcement posted: "${title}"`);
-    $('announce-title').value = '';
-    $('announce-body').value = '';
-    showToast('✅ Announcement posted!');
+    try {
+      const r = await fetch('/api/announcements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body })
+      });
+      const data = await r.json();
+      if (!r.ok) { showToast('⚠️ ' + (data.error || 'Could not post announcement.')); return; }
+      await loadAnnouncements();
+      logActivity(`📣 Announcement posted: "${title}"`);
+      $('announce-title').value = '';
+      $('announce-body').value = '';
+      showToast('✅ Announcement posted!');
+    } catch (err) {
+      showToast('⚠️ Network error — could not post announcement.');
+    }
   });
 
   // Post event
-  $('post-event-btn').addEventListener('click', () => {
+  $('post-event-btn').addEventListener('click', async () => {
     const title = $('event-title-input').value.trim();
     const dateVal = $('event-date-input').value;
     const desc = $('event-desc-input').value.trim();
     if (!title || !dateVal) { showToast('⚠️ Please add a title and date.'); return; }
-    const d = new Date(dateVal);
-    const ev = {
-      id: 'ev' + Date.now(), title, desc,
-      date: d.toISOString(),
-      time: d.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }),
-      rsvpCount: 0
-    };
-    STATE.events.unshift(ev);
-    saveState();
-    renderEvents();
-    logActivity(`📅 Event scheduled: "${title}" on ${formatDate(ev.date)}`);
-    $('event-title-input').value = '';
-    $('event-date-input').value = '';
-    $('event-desc-input').value = '';
-    showToast('✅ Event added to calendar!');
+    try {
+      const r = await fetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, date: dateVal, desc })
+      });
+      const data = await r.json();
+      if (!r.ok) { showToast('⚠️ ' + (data.error || 'Could not add event.')); return; }
+      await loadEvents();
+      logActivity(`📅 Event scheduled: "${title}" on ${formatDate(data.event.date)}`);
+      $('event-title-input').value = '';
+      $('event-date-input').value = '';
+      $('event-desc-input').value = '';
+      showToast('✅ Event added to calendar!');
+    } catch (err) {
+      showToast('⚠️ Network error — could not add event.');
+    }
   });
 
   // Clear log
-  $('clear-log-btn').addEventListener('click', () => {
+  $('clear-log-btn').addEventListener('click', async () => {
     STATE.activityLog = [];
-    saveState();
     renderActivityLog();
+    try {
+      await fetch('/api/activity-log/clear', { method: 'POST' });
+    } catch (err) {
+      console.error('Failed to clear activity log:', err);
+    }
     showToast('Log cleared.');
   });
 }
@@ -516,7 +578,8 @@ function initHome() {
     setVerse(SCRIPTURES[idx]);
   });
 
-  renderAnnouncements();
+  loadAnnouncements();
+  loadActivityLog();
 }
 
 function setVerse(s) {
@@ -940,29 +1003,31 @@ function initPrayerWall() {
   });
 
   $('post-prayer-btn').addEventListener('click', postPrayer);
-  renderPrayers();
+  loadPrayers();
 }
 
-function postPrayer() {
+async function postPrayer() {
   const body = $('prayer-body').value.trim();
   if (!body) { showToast('⚠️ Please write something first.'); return; }
   const author = $('prayer-author').value.trim() || 'Anonymous';
-  const post = {
-    id: 'pr' + Date.now(),
-    type: STATE.currentPrayerType,
-    author,
-    body,
-    date: new Date().toISOString(),
-    amens: 0
-  };
-  STATE.prayers.unshift(post);
-  saveState();
-  renderPrayers();
-  $('prayer-body').value = '';
-  $('prayer-author').value = '';
-  const typeLabel = STATE.currentPrayerType === 'prayer' ? '🙏 Prayer request' : '🎉 Praise report';
-  showToast(`✅ ${typeLabel} posted!`);
-  logActivity(`${typeLabel} by ${author}`);
+  const type = STATE.currentPrayerType;
+  try {
+    const r = await fetch('/api/prayers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, author, body })
+    });
+    const data = await r.json();
+    if (!r.ok) { showToast('⚠️ ' + (data.error || 'Could not post.')); return; }
+    await loadPrayers();
+    $('prayer-body').value = '';
+    $('prayer-author').value = '';
+    const typeLabel = type === 'prayer' ? '🙏 Prayer request' : '🎉 Praise report';
+    showToast(`✅ ${typeLabel} posted!`);
+    logActivity(`${typeLabel} by ${author}`);
+  } catch (err) {
+    showToast('⚠️ Network error — could not post.');
+  }
 }
 
 function renderPrayers() {
@@ -972,7 +1037,7 @@ function renderPrayers() {
     return;
   }
   feed.innerHTML = STATE.prayers.map(p => {
-    const amened = (STATE.amens[p.id] || []).includes('self');
+    const amened = !!p.amened;
     const count = p.amens || 0;
     return `
       <div class="prayer-card ${p.type}">
@@ -991,19 +1056,23 @@ function renderPrayers() {
   }).join('');
 }
 
-function toggleAmen(postId) {
-  const already = (STATE.amens[postId] || []).includes('self');
+async function toggleAmen(postId) {
   const post = STATE.prayers.find(p => p.id === postId);
   if (!post) return;
-  if (already) {
-    STATE.amens[postId] = [];
-    post.amens = Math.max(0, (post.amens || 1) - 1);
-  } else {
-    STATE.amens[postId] = ['self'];
-    post.amens = (post.amens || 0) + 1;
+  try {
+    const r = await fetch(`/api/prayers/${postId}/amen`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: DEVICE_ID })
+    });
+    const data = await r.json();
+    if (!r.ok) { showToast('⚠️ ' + (data.error || 'Could not update Amen.')); return; }
+    post.amened = data.amened;
+    post.amens = data.amens;
+    renderPrayers();
+  } catch (err) {
+    showToast('⚠️ Network error — could not update Amen.');
   }
-  saveState();
-  renderPrayers();
 }
 window.toggleAmen = toggleAmen;
 
@@ -1011,7 +1080,7 @@ window.toggleAmen = toggleAmen;
    ⑫ CALENDAR MODULE
 ──────────────────────────────────────────────────────── */
 function initCalendar() {
-  renderEvents();
+  loadEvents();
 }
 
 function renderEvents() {
@@ -1023,7 +1092,7 @@ function renderEvents() {
   // Sort by date ascending
   const sorted = [...STATE.events].sort((a, b) => new Date(a.date) - new Date(b.date));
   list.innerHTML = sorted.map(ev => {
-    const attending = STATE.rsvps[ev.id] === true;
+    const attending = !!ev.attending;
     return `
       <div class="event-card">
         <div class="event-date-badge">
@@ -1043,15 +1112,24 @@ function renderEvents() {
   }).join('');
 }
 
-function toggleRSVP(eventId) {
+async function toggleRSVP(eventId) {
   const ev = STATE.events.find(e => e.id === eventId);
   if (!ev) return;
-  const was = STATE.rsvps[eventId] === true;
-  STATE.rsvps[eventId] = !was;
-  ev.rsvpCount = Math.max(0, (ev.rsvpCount || 0) + (was ? -1 : 1));
-  saveState();
-  renderEvents();
-  showToast(was ? 'RSVP cancelled.' : `✅ RSVP confirmed for "${ev.title}"!`);
+  try {
+    const r = await fetch(`/api/events/${eventId}/rsvp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: DEVICE_ID })
+    });
+    const data = await r.json();
+    if (!r.ok) { showToast('⚠️ ' + (data.error || 'Could not update RSVP.')); return; }
+    ev.attending = data.attending;
+    ev.rsvpCount = data.rsvpCount;
+    renderEvents();
+    showToast(data.attending ? `✅ RSVP confirmed for "${ev.title}"!` : 'RSVP cancelled.');
+  } catch (err) {
+    showToast('⚠️ Network error — could not update RSVP.');
+  }
 }
 window.toggleRSVP = toggleRSVP;
 
@@ -2091,8 +2169,11 @@ function printMemberList() {
 /* ────────────────────────────────────────────────────────
    TREASURER DASHBOARD
 ──────────────────────────────────────────────────────── */
-const CONTRIB_KEY = 'cga_contributions';
-let _contributions = JSON.parse(localStorage.getItem(CONTRIB_KEY) || '[]');
+// Contributions used to live ONLY in the treasurer's browser localStorage —
+// meaning financial records were per-device, not backed up, and lost if the
+// browser cache was cleared. They now live in Postgres via /api/contributions,
+// shared across every device the treasurer logs in from.
+let _contributions = [];
 
 const CONTRIB_ICONS = { Tithe:'🙏', Offering:'🎁', Welfare:'🤝', Building:'🏛', Other:'💵' };
 
@@ -2111,7 +2192,7 @@ function initTreasurer() {
   $('treas-print-btn').addEventListener('click', printContributions);
 }
 
-function loadMembersForTreasurer() {
+async function loadMembersForTreasurer() {
   // Populate total members count and datalist for autocomplete
   fetch('/api/members/list').then(r => r.json()).then(data => {
     const members = (data.members || []).filter(m => m.status === 'active');
@@ -2119,6 +2200,18 @@ function loadMembersForTreasurer() {
     const dl = $('treas-member-datalist');
     dl.innerHTML = members.map(m => `<option value="${m.fullName}">`).join('');
   }).catch(() => {});
+  await loadContributions();
+}
+
+async function loadContributions() {
+  try {
+    const r = await fetch('/api/contributions');
+    const data = await r.json();
+    _contributions = data.contributions || [];
+  } catch (err) {
+    console.error('Failed to load contributions:', err);
+    showToast('⚠️ Could not load contributions — check your connection.');
+  }
   renderContributions();
   updateTreasStats();
 }
@@ -2127,7 +2220,7 @@ function updateTreasStats() {
   $('treas-tithe-count').textContent = _contributions.filter(c => c.type === 'Tithe').length;
 }
 
-function recordContribution() {
+async function recordContribution() {
   const memberName = $('treas-member-name').value.trim();
   const type       = $('treas-contrib-type').value;
   const amountRaw  = $('treas-amount').value.trim().replace(/,/g, '');
@@ -2138,29 +2231,27 @@ function recordContribution() {
   if (!amountRaw || isNaN(Number(amountRaw)) || Number(amountRaw) <= 0) { showToast('⚠️ Please enter a valid amount.'); return; }
   if (!date)       { showToast('⚠️ Please select a date.'); return; }
 
-  const contrib = {
-    id:     'ctr_' + Date.now(),
-    member: memberName,
-    type,
-    amount: Number(amountRaw),
-    date,
-    notes,
-    recordedAt: new Date().toISOString()
-  };
+  try {
+    const r = await fetch('/api/contributions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ member: memberName, type, amount: Number(amountRaw), date, notes })
+    });
+    const data = await r.json();
+    if (!r.ok) { showToast('⚠️ ' + (data.error || 'Could not record contribution.')); return; }
 
-  _contributions.unshift(contrib);
-  localStorage.setItem(CONTRIB_KEY, JSON.stringify(_contributions));
+    // Reset fields
+    $('treas-member-name').value = '';
+    $('treas-amount').value      = '';
+    $('treas-notes').value       = '';
+    $('treas-date').value        = new Date().toISOString().slice(0, 10);
 
-  // Reset fields
-  $('treas-member-name').value = '';
-  $('treas-amount').value      = '';
-  $('treas-notes').value       = '';
-  $('treas-date').value        = new Date().toISOString().slice(0, 10);
-
-  renderContributions();
-  updateTreasStats();
-  showToast(`✅ KES ${Number(amountRaw).toLocaleString()} recorded for ${memberName}.`);
-  logActivity(`💰 ${type} KES ${Number(amountRaw).toLocaleString()} – ${memberName}`);
+    await loadContributions();
+    showToast(`✅ KES ${Number(amountRaw).toLocaleString()} recorded for ${memberName}.`);
+    logActivity(`💰 ${type} KES ${Number(amountRaw).toLocaleString()} – ${memberName}`);
+  } catch (err) {
+    showToast('⚠️ Network error — could not record contribution.');
+  }
 }
 
 function renderContributions() {
@@ -2199,13 +2290,20 @@ function renderContributions() {
   }).join('');
 }
 
-function deleteContrib(id) {
+async function deleteContrib(id) {
   if (!confirm('Delete this contribution record?')) return;
-  _contributions = _contributions.filter(c => c.id !== id);
-  localStorage.setItem(CONTRIB_KEY, JSON.stringify(_contributions));
-  renderContributions();
-  updateTreasStats();
-  showToast('🗑 Record deleted.');
+  try {
+    const r = await fetch('/api/contributions/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (!r.ok) { showToast('⚠️ Could not delete record.'); return; }
+    await loadContributions();
+    showToast('🗑 Record deleted.');
+  } catch (err) {
+    showToast('⚠️ Network error — could not delete record.');
+  }
 }
 
 function printContributions() {
