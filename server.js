@@ -284,9 +284,15 @@ const cookiesAvailable = refreshWritableCookies();
 const hasCookies   = () => fs.existsSync(COOKIES_PATH);
 const cookiesFlag  = () => hasCookies() ? `--cookies "${COOKIES_PATH}"` : '';
 
+// yt-dlp needs to download a small "EJS" solver script (not just have Deno
+// installed) to actually run YouTube's JS signature challenge. This is off
+// by default; the flag below turns it on, per yt-dlp's own recommendation
+// when this component is skipped. See: https://github.com/yt-dlp/yt-dlp/wiki/EJS
+const REMOTE_COMPONENTS_FLAG = '--remote-components ejs:github';
+
 function ytdlp(args) {
   return new Promise((resolve, reject) => {
-    exec(`yt-dlp ${cookiesFlag()} ${args}`, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    exec(`yt-dlp ${cookiesFlag()} ${REMOTE_COMPONENTS_FLAG} ${args}`, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(stderr || err.message);
       resolve(stdout.trim());
     });
@@ -442,6 +448,7 @@ app.post('/api/download/stream', async (req, res) => {
     url
   ];
   if (hasCookies()) args.unshift('--cookies', COOKIES_PATH);
+  args.unshift('--remote-components', 'ejs:github');
 
   console.log(`[DL] Starting: ${filename} fmt=${fmtArg}`);
 
