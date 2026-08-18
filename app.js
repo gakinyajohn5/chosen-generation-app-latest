@@ -1425,12 +1425,16 @@ function initDownloader() {
 /* ── Step 1: Fetch video metadata and available formats ── */
 async function dlFetchInfo() {
   const raw = $('dl-url-input').value.trim();
-  if (!raw) { showToast('⚠️ Paste a YouTube URL or video ID first.'); return; }
+  if (!raw) { showToast('⚠️ Paste a video URL first.'); return; }
 
-  // Extract video ID from URL or bare ID
-  const vid = extractVideoId(raw) || (raw.length === 11 ? raw : null);
-  if (!vid) {
-    showToast('⚠️ Could not read a valid YouTube video ID.');
+  // If it's a full URL (any yt-dlp-supported site — YouTube, TikTok,
+  // Instagram, Twitter/X, Reddit, etc.) send it as-is. Otherwise fall back
+  // to treating it as a bare YouTube video ID for backward compatibility.
+  const isUrl = /^https?:\/\//i.test(raw);
+  const vid = !isUrl ? (extractVideoId(raw) || (raw.length === 11 ? raw : null)) : null;
+
+  if (!isUrl && !vid) {
+    showToast('⚠️ Paste a full video URL, or a valid YouTube video ID.');
     return;
   }
 
@@ -1443,7 +1447,7 @@ async function dlFetchInfo() {
     const res = await fetch('/api/download/info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId: vid })
+      body: JSON.stringify(isUrl ? { url: raw } : { videoId: vid })
     });
 
     const data = await res.json();
@@ -1466,7 +1470,7 @@ async function dlFetchInfo() {
 /* ── Render the video info card with format buttons ── */
 function dlRenderInfoCard(info) {
   // Thumbnail & meta
-  $('dl-thumb').src = info.thumbnail || `https://img.youtube.com/vi/${info.videoId}/mqdefault.jpg`;
+  $('dl-thumb').src = info.thumbnail || (info.videoId ? `https://img.youtube.com/vi/${info.videoId}/mqdefault.jpg` : '');
   $('dl-title').textContent = info.title || 'Unknown Title';
   $('dl-channel').textContent = info.channel || '';
   $('dl-duration').textContent = info.duration ? `⏱ ${info.duration}` : '';
@@ -1508,7 +1512,7 @@ async function dlStartDownload() {
     return;
   }
 
-  const { videoId, title, thumbnail, channel } = DL_CURRENT_INFO;
+  const { url, videoId, title, thumbnail, channel } = DL_CURRENT_INFO;
   const fmt = DL_SELECTED_FORMAT;
 
   dlSetStatus('loading', `Preparing download: ${fmt.quality || fmt.format_id}…`);
@@ -1519,7 +1523,7 @@ async function dlStartDownload() {
     const res = await fetch('/api/download/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId, formatId: fmt.format_id, ext: fmt.ext || 'mp4' })
+      body: JSON.stringify({ url, videoId, formatId: fmt.format_id, ext: fmt.ext || 'mp4', title })
     });
 
     if (!res.ok) {
