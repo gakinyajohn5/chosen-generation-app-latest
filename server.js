@@ -377,14 +377,23 @@ async function fetchVideoInfo(url) {
   };
 }
 
-// POST /api/download/info  (called by existing frontend with { videoId })
+// POST /api/download/info  — accepts { url } for any yt-dlp-supported site
+// (YouTube, TikTok, Instagram, Twitter/X, Reddit, etc.), or the legacy
+// { videoId } for a plain YouTube video ID/back-compat.
 app.post('/api/download/info', async (req, res) => {
-  const { videoId } = req.body;
-  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId))
-    return res.status(400).json({ error: 'Invalid YouTube video ID.' });
+  const { url: rawUrl, videoId } = req.body;
+
+  let sourceUrl;
+  if (rawUrl && /^https?:\/\//i.test(rawUrl.trim())) {
+    sourceUrl = rawUrl.trim();
+  } else if (videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+    sourceUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  } else {
+    return res.status(400).json({ error: 'Please paste a valid video URL (YouTube, TikTok, Instagram, Twitter/X, Reddit, etc).' });
+  }
 
   try {
-    const data = await fetchVideoInfo(`https://www.youtube.com/watch?v=${videoId}`);
+    const data = await fetchVideoInfo(sourceUrl);
 
     // Flatten formats for existing frontend (expects flat array)
     const flat = [
@@ -401,11 +410,12 @@ app.post('/api/download/info', async (req, res) => {
     }));
 
     return res.json({
-      videoId,
+      url:       sourceUrl,
+      videoId:   data.videoId || videoId || null,
       title:     data.title     || 'Unknown',
       channel:   data.channel   || '',
       duration:  data.duration  || '',
-      thumbnail: data.thumbnail || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+      thumbnail: data.thumbnail || (data.videoId ? `https://img.youtube.com/vi/${data.videoId}/mqdefault.jpg` : ''),
       formats:   flat
     });
   } catch (err) {
@@ -423,15 +433,21 @@ app.post('/api/download/info', async (req, res) => {
    Saves to disk first (reliable), then streams to browser
 ──────────────────────────────────────────────────────── */
 app.post('/api/download/stream', async (req, res) => {
-  const { videoId, formatId, ext, title, merge } = req.body;
+  const { url: rawUrl, videoId, formatId, ext, title, merge } = req.body;
 
-  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId))
-    return res.status(400).json({ error: 'Invalid video ID.' });
+  let url, safeTitle;
+  if (rawUrl && /^https?:\/\//i.test(rawUrl.trim())) {
+    url = rawUrl.trim();
+    safeTitle = sanitize(title || 'video');
+  } else if (videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+    url = `https://www.youtube.com/watch?v=${videoId}`;
+    safeTitle = sanitize(title || `video_${videoId}`);
+  } else {
+    return res.status(400).json({ error: 'Missing or invalid video URL.' });
+  }
   if (!formatId)
     return res.status(400).json({ error: 'Missing formatId.' });
 
-  const url      = `https://www.youtube.com/watch?v=${videoId}`;
-  const safeTitle = sanitize(title || `video_${videoId}`);
   const outExt   = ext || 'mp4';
   const filename = `${safeTitle}.${outExt}`;
   const outPath  = path.join(DOWNLOADS_DIR, `${Date.now()}_${filename}`);
