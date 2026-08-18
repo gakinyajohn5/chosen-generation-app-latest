@@ -604,9 +604,28 @@ function renderAnnouncements() {
         <div class="ann-date">${formatDate(a.date)}</div>
       </div>
       <div class="ann-body">${sanitize(a.body)}</div>
+      ${STATE.isAdmin ? `<button class="btn-danger-sm" style="margin-top:8px" onclick="deleteAnnouncement('${a.id}')">🗑 Delete</button>` : ''}
     </div>
   `).join('');
 }
+
+async function deleteAnnouncement(id) {
+  if (!confirm('Delete this announcement?')) return;
+  try {
+    const r = await fetch('/api/announcements/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (!r.ok) { showToast('⚠️ Could not delete announcement.'); return; }
+    await loadAnnouncements();
+    showToast('🗑 Announcement deleted.');
+    logActivity('🗑 Announcement deleted');
+  } catch (err) {
+    showToast('⚠️ Network error — could not delete announcement.');
+  }
+}
+window.deleteAnnouncement = deleteAnnouncement;
 
 /* ────────────────────────────────────────────────────────
    ⑨ FELLOWSHIP / JITSI MODULE
@@ -1111,10 +1130,29 @@ function renderEvents() {
             ${attending ? '✅ Attending' : '📋 I\'m Attending'}
             <span class="rsvp-count">${ev.rsvpCount || 0}</span>
           </button>
+          ${STATE.isAdmin ? `<button class="btn-danger-sm" style="margin-top:8px" onclick="deleteEvent('${ev.id}')">🗑 Delete</button>` : ''}
         </div>
       </div>`;
   }).join('');
 }
+
+async function deleteEvent(id) {
+  if (!confirm('Delete this event?')) return;
+  try {
+    const r = await fetch('/api/events/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (!r.ok) { showToast('⚠️ Could not delete event.'); return; }
+    await loadEvents();
+    showToast('🗑 Event deleted.');
+    logActivity('🗑 Event deleted');
+  } catch (err) {
+    showToast('⚠️ Network error — could not delete event.');
+  }
+}
+window.deleteEvent = deleteEvent;
 
 async function toggleRSVP(eventId) {
   const ev = STATE.events.find(e => e.id === eventId);
