@@ -446,6 +446,10 @@ function switchTab(tabId) {
     const chatBody = $('ai-chat-body');
     if (chatBody) requestAnimationFrame(() => { chatBody.scrollTop = chatBody.scrollHeight; });
   }
+
+  if (tabId === 'register') {
+    renderRegistrationView();
+  }
 }
 
 /* ────────────────────────────────────────────────────────
@@ -1218,15 +1222,10 @@ async function handleAISend() {
   AI_HISTORY.push({ role: 'user', parts: [{ text: message }] });
 
   try {
-    const storedUser = getStoredUser();
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message,
-        history: AI_HISTORY,
-        userName: storedUser ? storedUser.fullName : null
-      })
+      body: JSON.stringify({ message, history: AI_HISTORY })
     });
 
     removeAILoader(loaderId);
@@ -1808,82 +1807,61 @@ const ROLE_STATE = {
 };
 
 /* ────────────────────────────────────────────────────────
-   IDENTITY MODULE — remembers the registered person on this
-   device (localStorage) so the app can greet them by name
-   and the AI assistant can address them personally.
+   REGISTRATION MODULE
 ──────────────────────────────────────────────────────── */
-const CG_USER_KEY = 'cg_user';
 
-function getStoredUser() {
-  try {
-    const raw = localStorage.getItem(CG_USER_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (err) {
-    return null;
-  }
+// A device can only register once — after a successful registration we save
+// a flag + the name used, so returning to this tab shows "already
+// registered" instead of the form. This is NOT a login; it's just so the
+// same person doesn't accidentally submit multiple registrations.
+function isAlreadyRegistered() {
+  return localStorage.getItem('cga_registered') === 'true';
 }
 
-function saveStoredUser(user) {
-  try {
-    localStorage.setItem(CG_USER_KEY, JSON.stringify(user));
-  } catch (err) {
-    console.warn('[IDENTITY] Could not save user locally:', err);
-  }
+function markAsRegistered(fullName) {
+  localStorage.setItem('cga_registered', 'true');
+  localStorage.setItem('cga_registered_name', fullName || '');
 }
 
-function clearStoredUser() {
-  try { localStorage.removeItem(CG_USER_KEY); } catch (err) {}
-}
+function renderRegistrationView() {
+  const alreadyCard = $('reg-already-card');
+  const successCard = $('reg-success-card');
+  const formWrap     = $('reg-form-wrap');
 
-function firstNameOf(fullName) {
-  return (fullName || '').trim().split(/\s+/)[0] || '';
-}
-
-// Applies the header greeting and switches the Register tab
-// between "form" and "already registered" states.
-function applyUserGreeting() {
-  const user = getStoredUser();
-  const greetingEl = $('user-greeting');
-
-  if (user && user.fullName) {
-    greetingEl.textContent = `Welcome, ${firstNameOf(user.fullName)} ✝`;
-    greetingEl.classList.remove('hidden');
-
-    $('reg-already-name').textContent = firstNameOf(user.fullName);
-    $('reg-already-card').classList.remove('hidden');
-    $('reg-success-card').classList.add('hidden');
-    $('reg-form-wrap').classList.add('hidden');
+  if (isAlreadyRegistered()) {
+    const name = localStorage.getItem('cga_registered_name');
+    $('reg-already-msg').textContent = name
+      ? `Looks like ${name} already joined from this device. If you need to update your details, please speak to the secretary.`
+      : `Looks like you've already joined from this device. If you need to update your details, please speak to the secretary.`;
+    alreadyCard.classList.remove('hidden');
+    successCard.classList.add('hidden');
+    formWrap.classList.add('hidden');
   } else {
-    greetingEl.classList.add('hidden');
-    $('reg-already-card').classList.add('hidden');
-    $('reg-form-wrap').classList.remove('hidden');
+    alreadyCard.classList.add('hidden');
+    successCard.classList.add('hidden');
+    formWrap.classList.remove('hidden');
   }
 }
 
-/* ────────────────────────────────────────────────────────
-   REGISTRATION MODULE — free registration, no payment
-──────────────────────────────────────────────────────── */
 function initRegistration() {
   $('reg-submit-btn').addEventListener('click', submitRegistration);
-  $('reg-not-you-btn').addEventListener('click', () => {
-    clearStoredUser();
-    applyUserGreeting();
+  $('reg-another-btn').addEventListener('click', () => {
+    $('reg-success-card').classList.add('hidden');
+    $('reg-form-wrap').classList.remove('hidden');
   });
-
-  // On load: if this device already registered someone, skip the form.
-  applyUserGreeting();
+  renderRegistrationView();
 }
 
 async function submitRegistration() {
-  const fullName          = $('reg-fullname').value.trim();
-  const phone              = $('reg-phone').value.trim();
-  const email               = $('reg-email').value.trim();
-  const dob                = $('reg-dob').value;
-  const gender              = $('reg-gender').value;
-  const address             = $('reg-address').value.trim();
-  const emergencyContact    = $('reg-emergency').value.trim();
-  const notes               = $('reg-notes').value.trim();
-  const btn                 = $('reg-submit-btn');
+  const fullName         = $('reg-fullname').value.trim();
+  const phone            = $('reg-phone').value.trim();
+  const email            = $('reg-email').value.trim();
+  const dob              = $('reg-dob').value;
+  const gender           = $('reg-gender').value;
+  const address          = $('reg-address').value.trim();
+  const emergencyContact = $('reg-emergency').value.trim();
+  const notes            = $('reg-notes').value.trim();
+  const btn              = $('reg-submit-btn');
 
   if (!fullName) { showRegStatus('error', '⚠️ Please enter your full name.'); return; }
   if (!phone)    { showRegStatus('error', '⚠️ Please enter your phone number.'); return; }
@@ -1901,30 +1879,24 @@ async function submitRegistration() {
     const data = await res.json();
 
     if (!res.ok) {
-      showRegStatus('error', '❌ ' + (data.error || 'Could not complete registration.'));
+      showRegStatus('error', '❌ ' + (data.error || 'Could not register. Please try again.'));
       btn.disabled = false;
-      btn.innerHTML = '<span>✅ Complete Registration</span>';
+      btn.innerHTML = '<span>✅ Register</span>';
       return;
     }
 
-    // Remember this person on this device — forever, until they clear it.
-    saveStoredUser({ id: data.id, fullName, phone, registeredAt: new Date().toISOString() });
-
+    markAsRegistered(fullName);
     $('reg-form-wrap').classList.add('hidden');
     $('reg-success-card').classList.remove('hidden');
     resetRegForm();
-
-    setTimeout(() => {
-      $('reg-success-card').classList.add('hidden');
-      applyUserGreeting();
-    }, 2500);
+    btn.disabled = false;
+    btn.innerHTML = '<span>✅ Register</span>';
 
   } catch (err) {
     showRegStatus('error', '❌ Network error. Please try again.');
+    btn.disabled = false;
+    btn.innerHTML = '<span>✅ Register</span>';
   }
-
-  btn.disabled = false;
-  btn.innerHTML = '<span>✅ Complete Registration</span>';
 }
 
 function resetRegForm() {
