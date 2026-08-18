@@ -29,6 +29,7 @@ require('dotenv').config();
 
 const express        = require('express');
 const path           = require('path');
+const os             = require('os');
 const fs             = require('fs');
 const { exec, spawn } = require('child_process');
 const { GoogleGenAI } = require('@google/genai');
@@ -216,7 +217,7 @@ function getClient() {
    ① POST /api/chat
 ──────────────────────────────────────────────────────── */
 app.post('/api/chat', async (req, res) => {
-  const { message, history, userName } = req.body;
+  const { message, history } = req.body;
   if (!message || typeof message !== 'string' || !message.trim())
     return res.status(400).json({ error: 'Missing or empty message.' });
 
@@ -230,19 +231,11 @@ app.post('/api/chat', async (req, res) => {
   }
   contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
-  // Personalise the system prompt with the member's name, if known.
-  const cleanName = (typeof userName === 'string' ? userName.trim().slice(0, 100) : '');
-  const personalisedInstruction = cleanName
-    ? `${SYSTEM_INSTRUCTION}\n\nThe person you are speaking with is named "${cleanName}". ` +
-      `Address them by their first name naturally where it fits (for example in greetings or ` +
-      `encouragement), without overusing it in every single sentence.`
-    : SYSTEM_INSTRUCTION;
-
   try {
     const result = await getClient().models.generateContent({
       model: 'gemini-2.5-flash',
       contents,
-      config: { systemInstruction: personalisedInstruction, maxOutputTokens: 800, temperature: 0.75, topP: 0.9 }
+      config: { systemInstruction: SYSTEM_INSTRUCTION, maxOutputTokens: 800, temperature: 0.75, topP: 0.9 }
     });
     const text = result.text;
     if (!text) return res.status(500).json({ error: 'Empty response. Try again.' });
@@ -265,7 +258,29 @@ app.post('/api/chat', async (req, res) => {
 // Optional YouTube cookies file — if present, yt-dlp uses it to look like a
 // real signed-in browser instead of an anonymous cloud server, which avoids
 // YouTube's "Sign in to confirm you're not a bot" block. See DEPLOY.md.
-const COOKIES_PATH = process.env.COOKIES_FILE || '/etc/secrets/cookies.txt';
+//
+// Render mounts Secret Files read-only at /etc/secrets/..., but yt-dlp tries
+// to WRITE BACK an updated cookie jar after every run (it rotates cookies as
+// it uses them). Writing to a read-only path crashes with
+// "OSError: Read-only file system". So on startup we copy the secret file
+// into a writable temp location and point yt-dlp at that copy instead —
+// yt-dlp can freely read/update it there without touching the read-only original.
+const SECRET_COOKIES_PATH = process.env.COOKIES_FILE || '/etc/secrets/cookies.txt';
+const COOKIES_PATH = path.join(os.tmpdir(), 'yt-cookies.txt');
+
+function refreshWritableCookies() {
+  try {
+    if (fs.existsSync(SECRET_COOKIES_PATH)) {
+      fs.copyFileSync(SECRET_COOKIES_PATH, COOKIES_PATH);
+      return true;
+    }
+  } catch (err) {
+    console.warn('[COOKIES] Could not copy cookies file to writable location:', err.message);
+  }
+  return false;
+}
+const cookiesAvailable = refreshWritableCookies();
+
 const hasCookies   = () => fs.existsSync(COOKIES_PATH);
 const cookiesFlag  = () => hasCookies() ? `--cookies "${COOKIES_PATH}"` : '';
 
