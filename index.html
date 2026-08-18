@@ -27,10 +27,7 @@
     <div class="header-left">
       <div class="header-cross">✝</div>
     </div>
-    <div class="header-titles">
-      <h1 id="header-title" title="Tap for admin access">Chosen Gen Hub</h1>
-      <p id="user-greeting" class="user-greeting hidden"></p>
-    </div>
+    <h1 id="header-title" title="Tap for admin access">Chosen Gen Hub</h1>
     <div class="header-right">
       <button id="help-btn" class="icon-btn" title="Help &amp; Install Guide" aria-label="Help and install guide">❓</button>
       <span id="admin-badge" class="admin-badge hidden">ADMIN</span>
@@ -563,14 +560,13 @@
         <div class="reg-success-icon">✝</div>
         <h3>Welcome to the Family!</h3>
         <p>Your registration has been submitted. The secretary will confirm your membership shortly. God bless you!</p>
+        <button class="btn-primary" id="reg-another-btn" style="margin-top:14px">Register Another Person</button>
       </div>
 
-      <!-- Shown instead of the form once this device has already registered -->
       <div id="reg-already-card" class="reg-success-card hidden">
-        <div class="reg-success-icon">✝</div>
-        <h3>Welcome back, <span id="reg-already-name"></span>!</h3>
-        <p>You're already registered with us on this device. Great to see you again.</p>
-        <button class="btn-ghost" id="reg-not-you-btn" style="margin-top:14px">Not you? Register a different person</button>
+        <div class="reg-success-icon">✅</div>
+        <h3>You're Already Registered</h3>
+        <p id="reg-already-msg">Looks like you've already joined from this device. If you need to update your details, please speak to the secretary.</p>
       </div>
 
       <div id="reg-form-wrap">
@@ -612,12 +608,8 @@
         <div id="reg-status" class="reg-status hidden"></div>
 
         <button class="btn-primary btn-large" id="reg-submit-btn">
-          <span>✅ Complete Registration</span>
+          <span>✅ Register</span>
         </button>
-        <div class="reg-pay-note">
-          <span>🔒</span>
-          <span>Your details are kept private and only visible to fellowship leadership.</span>
-        </div>
       </div>
     </section>
 
