@@ -873,7 +873,14 @@ app.listen(PORT, () => {
 
   // Check yt-dlp on startup
   exec('yt-dlp --version', (err, stdout) => {
-    if (!err) console.log(`   yt-dlp ${stdout.trim()}  ✅\n`);
-    else      console.log(`   ⚠️  yt-dlp NOT found! Open a NEW terminal and run: winget install yt-dlp\n`);
+    if (!err) console.log(`   yt-dlp ${stdout.trim()}  ✅`);
+    else      console.log(`   ⚠️  yt-dlp NOT found! Open a NEW terminal and run: winget install yt-dlp`);
+  });
+
+  // Check Deno on startup — yt-dlp uses it to solve YouTube's JS signature
+  // challenge; without it, YouTube downloads fail with "n challenge solving failed".
+  exec('deno --version', (err, stdout) => {
+    if (!err) console.log(`   Deno ${stdout.trim().split('\n')[0]}  ✅ (YouTube JS challenges supported)\n`);
+    else      console.log(`   ⚠️  Deno NOT found — YouTube downloads may fail with "n challenge solving failed"\n`);
   });
 });
